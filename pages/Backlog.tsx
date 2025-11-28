@@ -3,7 +3,9 @@ import { BacklogItem, Priority } from '../types';
 import { storageService } from '../services/storageService';
 import { parseBacklogWithAI } from '../services/geminiService';
 import { Button, Input, Select, Card, Badge, Modal } from '../components/ui';
-import { Plus, Wand2, Trash2, Edit2, AlertCircle } from 'lucide-react';
+import { Plus, Wand2, Trash2, AlertCircle } from 'lucide-react';
+import { useToast } from '../context/ToastContext';
+import { getErrorMessage } from '../utils';
 
 export const Backlog: React.FC = () => {
   const [items, setItems] = useState<BacklogItem[]>([]);
@@ -12,6 +14,7 @@ export const Backlog: React.FC = () => {
   const [isAiModalOpen, setIsAiModalOpen] = useState(false);
   const [rawText, setRawText] = useState('');
   const [aiLoading, setAiLoading] = useState(false);
+  const { showToast } = useToast();
   
   // New Item State
   const [newItem, setNewItem] = useState<{title: string, story_points: number, priority: Priority}>({
@@ -24,21 +27,39 @@ export const Backlog: React.FC = () => {
 
   const loadBacklog = async () => {
     setLoading(true);
-    const data = await storageService.getBacklog();
-    setItems(data);
-    setLoading(false);
+    try {
+      const data = await storageService.getBacklog();
+      setItems(data);
+    } catch (error: any) {
+      console.error('Failed to load backlog:', error);
+      // Suppress 406 Not Acceptable which can happen on empty tables in some Supabase configs
+      if (error?.code !== '406') {
+        showToast(getErrorMessage(error), 'error');
+      }
+    } finally {
+      setLoading(false);
+    }
   };
 
   const handleAddItem = async (e: React.FormEvent) => {
     e.preventDefault();
-    await storageService.addBacklogItem({ ...newItem, description: '', dependencies: [] });
-    setIsModalOpen(false);
-    loadBacklog();
+    try {
+      await storageService.addBacklogItem({ ...newItem, description: '', dependencies: [] });
+      setIsModalOpen(false);
+      loadBacklog();
+      setNewItem({ title: '', story_points: 1, priority: 'Medium' });
+    } catch (error: any) {
+      showToast(getErrorMessage(error), 'error');
+    }
   };
 
   const handleDelete = async (id: string) => {
-    await storageService.deleteBacklogItem(id);
-    loadBacklog();
+    try {
+      await storageService.deleteBacklogItem(id);
+      loadBacklog();
+    } catch (error: any) {
+      showToast(getErrorMessage(error), 'error');
+    }
   };
 
   const handleAiParse = async () => {
@@ -52,9 +73,10 @@ export const Backlog: React.FC = () => {
       setRawText('');
       setIsAiModalOpen(false);
       loadBacklog();
-    } catch (e) {
+      showToast('Items imported successfully', 'success');
+    } catch (e: any) {
       console.error(e);
-      alert('AI Parsing failed. Check API Key.');
+      showToast(`AI Parsing failed: ${getErrorMessage(e)}`, 'error');
     } finally {
       setAiLoading(false);
     }

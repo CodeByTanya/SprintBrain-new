@@ -3,18 +3,30 @@ import { storageService } from '../services/storageService';
 import { planSprintWithAI, generateJiraCSV } from '../services/geminiService';
 import { Sprint, BacklogItem } from '../types';
 import { Button, Input, Card, Badge, Modal } from '../components/ui';
-import { Calendar, Play, Download, AlertTriangle, CheckCircle } from 'lucide-react';
+import { Calendar, Play, Download, AlertTriangle, CheckCircle, Save } from 'lucide-react';
+import { useToast } from '../context/ToastContext';
+
+// Helper for error messages (duplicate of Backlog.tsx for now, ideally in utils)
+const getErrorMessage = (error: any): string => {
+  if (typeof error === 'string') return error;
+  if (error instanceof Error) return error.message;
+  if (error && typeof error === 'object' && 'message' in error) return String(error.message);
+  return 'An unknown error occurred';
+};
 
 export const SprintPlanner: React.FC = () => {
   const [step, setStep] = useState<1 | 2>(1);
   const [loading, setLoading] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const { showToast } = useToast();
+  
   const [constraints, setConstraints] = useState({
     velocity: 20,
     teamSize: 3,
     capacity: 20 // Often same as velocity, but editable
   });
   
-  const [generatedSprint, setGeneratedSprint] = useState<Partial<Sprint> | null>(null);
+  const [generatedSprint, setGeneratedSprint] = useState<Partial<Sprint> & { assignments: any[] } | null>(null);
   const [errorModal, setErrorModal] = useState<{isOpen: boolean, message: string}>({isOpen: false, message: ''});
 
   const handlePlan = async () => {
@@ -40,24 +52,43 @@ export const SprintPlanner: React.FC = () => {
           backlog_item: originalItem,
           backlog_item_id: originalItem?.id
         };
-      });
+      }).filter((a: any) => a.backlog_item_id); // Filter out items that couldn't be matched
+
+      if (hydratedAssignments.length === 0) {
+        throw new Error("AI generated a plan but couldn't match any backlog items. Please try again.");
+      }
 
       setGeneratedSprint({
-        sprint_name: result.sprint_name,
+        sprint_name: result.sprint_name || `Sprint ${new Date().toLocaleDateString()}`,
         ai_summary: result.ai_summary,
         assignments: hydratedAssignments,
         capacity: constraints.capacity,
         velocity: constraints.velocity
       });
       setStep(2);
-    } catch (error) {
+    } catch (error: any) {
       console.error(error);
       setErrorModal({
         isOpen: true,
-        message: 'Planning failed. Please check your API key.'
+        message: getErrorMessage(error)
       });
     } finally {
       setLoading(false);
+    }
+  };
+
+  const handleSaveSprint = async () => {
+    if (!generatedSprint) return;
+    setSaving(true);
+    try {
+      await storageService.saveSprint(generatedSprint);
+      showToast('Sprint saved successfully!', 'success');
+      // Optionally navigate away or reset
+    } catch (error: any) {
+      console.error(error);
+      showToast(getErrorMessage(error), 'error');
+    } finally {
+      setSaving(false);
     }
   };
 
@@ -146,9 +177,13 @@ export const SprintPlanner: React.FC = () => {
         </div>
         <div className="flex gap-2">
           <Button variant="outline" onClick={() => setStep(1)}>Back</Button>
+          <Button variant="secondary" onClick={handleSaveSprint} isLoading={saving}>
+            <Save className="h-4 w-4 mr-2" />
+            Save Sprint
+          </Button>
           <Button onClick={handleExport}>
             <Download className="h-4 w-4 mr-2" />
-            Export to Jira
+            Export CSV
           </Button>
         </div>
       </div>

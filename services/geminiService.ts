@@ -9,6 +9,16 @@ const getAiClient = () => {
   return new GoogleGenAI({ apiKey });
 };
 
+const cleanJson = (text: string): string => {
+  if (!text) return '{}';
+  // Remove markdown code blocks if present
+  const match = text.match(/```(?:json)?\s*([\s\S]*?)\s*```/);
+  if (match) {
+    return match[1];
+  }
+  return text;
+};
+
 export const parseBacklogWithAI = async (rawText: string) => {
   const ai = getAiClient();
   const prompt = `
@@ -48,7 +58,13 @@ export const parseBacklogWithAI = async (rawText: string) => {
     }
   });
 
-  return JSON.parse(response.text || '{"items": []}').items;
+  const text = response.text || '{"items": []}';
+  try {
+    return JSON.parse(cleanJson(text)).items || [];
+  } catch (e) {
+    console.error("Failed to parse AI response:", text);
+    throw new Error("AI response was not valid JSON. Please try again.");
+  }
 };
 
 export const planSprintWithAI = async (
@@ -104,7 +120,13 @@ export const planSprintWithAI = async (
     }
   });
 
-  return JSON.parse(response.text || '{}');
+  const text = response.text || '{}';
+  try {
+    return JSON.parse(cleanJson(text));
+  } catch (e) {
+    console.error("Failed to parse AI response:", text);
+    throw new Error("Failed to parse AI sprint plan.");
+  }
 };
 
 export const generateJiraCSV = async (sprintName: string, items: any[]) => {
@@ -127,5 +149,7 @@ export const generateJiraCSV = async (sprintName: string, items: any[]) => {
     contents: prompt,
   });
 
-  return response.text;
+  // Clean CSV response just in case
+  const text = response.text || '';
+  return cleanJson(text); // Reusing cleanJson as it strips markdown blocks which is what we want
 };
